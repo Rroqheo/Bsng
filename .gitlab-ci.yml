@@ -1,6 +1,7 @@
 stages:
   - test
   - build
+  - train
   - deploy
 
 variables:
@@ -81,3 +82,30 @@ deploy:prod:
   script:
     - chmod +x deploy.sh
     - ./deploy.sh
+
+train:model:
+  stage: train
+  image: python:3.11
+  rules:
+    - when: manual
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  variables:
+    EPOCHS: "1"
+    DATASET_PATH: ""
+    EXTRA_ARGS: ""
+  before_script:
+    - pip install -U pip
+    - if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+  script:
+    - |
+      set -e
+      if [ -f run_training.sh ]; then
+        chmod +x run_training.sh
+        ./run_training.sh $EXTRA_ARGS
+      elif [ -f train.py ]; then
+        python train.py --epochs "$EPOCHS" --dataset "$DATASET_PATH" $EXTRA_ARGS
+      else
+        echo "No training entrypoint found (run_training.sh or train.py)" >&2
+        exit 1
+      fi

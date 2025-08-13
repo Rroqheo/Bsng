@@ -1,0 +1,56 @@
+name: Train
+
+on:
+  workflow_dispatch:
+    inputs:
+      epochs:
+        description: "Number of epochs"
+        required: false
+        default: "1"
+      dataset_path:
+        description: "Dataset path or URL"
+        required: false
+        default: ""
+      extra_args:
+        description: "Extra args passed to script"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 2 * * *"
+
+concurrency:
+  group: train-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Model training
+    # If you have a GPU runner, replace with: [self-hosted, gpu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies (if present)
+        run: |
+          if [ -f requirements.txt ]; then pip install -U pip && pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+      - name: Run training entrypoint
+        env:
+          EPOCHS: ${{ inputs.epochs }}
+          DATASET_PATH: ${{ inputs.dataset_path }}
+          EXTRA_ARGS: ${{ inputs.extra_args }}
+        run: |
+          set -e
+          if [ -f run_training.sh ]; then
+            chmod +x run_training.sh
+            ./run_training.sh ${EXTRA_ARGS}
+          elif [ -f train.py ]; then
+            python train.py --epochs "${EPOCHS}" --dataset "${DATASET_PATH}" ${EXTRA_ARGS}
+          else
+            echo "No training entrypoint found (run_training.sh or train.py)" >&2
+            exit 1
+          fi
