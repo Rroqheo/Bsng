@@ -1,0 +1,83 @@
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NODE_ENV: test
+
+cache:
+  key: ${CI_COMMIT_REF_SLUG}
+  paths:
+    - node_modules/
+    - .cache/pip
+    - .npm/
+
+.node_template: &node_template
+  image: node:20
+  before_script:
+    - npm ci || npm install
+  script:
+    - npm test --if-present
+
+.python_template: &python_template
+  image: python:3.11
+  before_script:
+    - pip install -U pip
+    - if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+  script:
+    - |
+      python - <<'PY'
+      import importlib.util, sys, subprocess
+      has_pytest = importlib.util.find_spec('pytest') is not None
+      if not has_pytest:
+          subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest"])
+      subprocess.check_call([sys.executable, "-m", "pytest", "-q"])
+      PY
+
+node:test:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"
+      exists:
+        - package.json
+  <<: *node_template
+
+python:test:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"
+      exists:
+        - requirements.txt
+  <<: *python_template
+
+docker:build:
+  stage: build
+  image: docker:27
+  services: [docker:27-dind]
+  variables:
+    DOCKER_DRIVER: overlay2
+  rules:
+    - exists:
+        - Dockerfile
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA .
+    - |
+      if [ "$PUBLISH_DOCKER" = "true" ]; then
+        echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+        docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+      fi
+
+deploy:prod:
+  stage: deploy
+  needs: ["node:test", "python:test", "docker:build"]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      exists:
+        - deploy.sh
+  image: alpine:3.20
+  script:
+    - chmod +x deploy.sh
+    - ./deploy.sh

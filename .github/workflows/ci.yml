@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node.js CI
+    if: ${{ hashFiles('package.json') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+      - name: Run tests
+        run: npm test --if-present
+
+  python:
+    name: Python CI
+    if: ${{ hashFiles('requirements.txt') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          fi
+      - name: Run tests (pytest if available)
+        if: ${{ hashFiles('tests/**') != '' || hashFiles('test_*.py') != '' }}
+        run: |
+          python - <<'PY'
+          import importlib.util, sys, subprocess
+          has_pytest = importlib.util.find_spec('pytest') is not None
+          if not has_pytest:
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "pytest"])
+          subprocess.check_call([sys.executable, "-m", "pytest", "-q"])
+          PY
+
+  docker:
+    name: Docker build
+    if: ${{ hashFiles('Dockerfile') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t local/image:${{ github.sha }} .
+      - name: Login to GHCR (optional)
+        if: ${{ env.PUBLISH_DOCKER == 'true' && secrets.GHCR_TOKEN != '' && github.repository_owner != '' }}
+        run: |
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+      - name: Push image (optional)
+        if: ${{ env.PUBLISH_DOCKER == 'true' && secrets.GHCR_TOKEN != '' }}
+        run: |
+          IMAGE=ghcr.io/${{ github.repository_owner }}/$(echo "${{ github.repository }}" | cut -d/ -f2)
+          docker tag local/image:${{ github.sha }} $IMAGE:${{ github.sha }}
+          docker push $IMAGE:${{ github.sha }}
+
+  deploy:
+    name: Deploy
+    needs: [node, python, docker]
+    if: ${{ github.ref == 'refs/heads/main' && hashFiles('deploy.sh') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run deploy script
+        env:
+          DEPLOY_ENV: production
+        run: bash ./deploy.sh
