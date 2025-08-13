@@ -1,0 +1,35 @@
+# Personal folders to ignore at repo root
+Desktop/
+Documents/
+Downloads/
+Library/
+Movies/
+Music/
+Pictures/
+Public/
+Applications/
+Applications (Parallels)/
+Parallels/
+vm/
+
+# Common OS/editor noise
+.DS_Store
+*.swp
+*.swo
+*.log
+
+# Virtual envs and caches
+.venv/
+.venvs/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+.npm/
+.npm-global/
+
+# IDE/tools
+.vscode/
+.idea/
+.cursor/
